@@ -12,6 +12,7 @@ using WindowsFormsApp1.Logging.Interfaces;
 using WindowsFormsApp1.Models;
 using WindowsFormsApp1.Repositories;
 using WindowsFormsApp1.Repositories.Interfaces;
+using WindowsFormsApp1.Services;
 
 namespace WindowsFormsApp1.Parsers
 {
@@ -59,19 +60,13 @@ namespace WindowsFormsApp1.Parsers
                         results.Add(parsed);
                         var name = string.IsNullOrEmpty(parsed.Name) ? "(no name)" : parsed.Name;
 
-                        
-                        if (toolMapRepo != null)
-                        {
-                            // Check if the EnumList is defined in Toolmap Schema
-                            CheckEnumListInToolMapSchema(toolMapRepo, parsed, logger, toolMapParentElementName);
+                        // Check the codelist values against EnumEnums in toolmapschema
+                        var valueService = new ToolMapEnumValueService();
+                        valueService.EnsureValuesAndRelations(toolMapRepo, new[] { parsed }, logger);
 
-                            // check if the EnumList has a relation to EnumList on the SPF Side
-                            CheckEnumListRels(toolMapRepo, parsed.EnumNumber, logger);
-
-                        }
                         if (logger != null)
                             logger.Success(string.Format("Processed: {0} (Enum={1}, Name='{2}', Entries={3})",
-                                Path.GetFileName(file), parsed.EnumNumber, name, parsed.Entries.Count));
+                               Path.GetFileName(file), parsed.EnumNumber, name, parsed.Entries.Count));
 
                     }
                     else
@@ -213,124 +208,6 @@ namespace WindowsFormsApp1.Parsers
             return text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         }
 
-        private static void CheckEnumListInToolMapSchema(
-            IToolMapSchemaRepository repo,
-            CodeList cl,
-            ILogger log,
-            string parentElementName)
-        {
-
-            if (log != null) 
-                log.Info("Checking if the enum list def exists in the Tool map schema");
-            
-
-            var doc = repo.Document;
-            if (doc == null || doc.Root == null)
-            {
-                if (log != null) log.Error("ToolMap repo has no loaded document.");
-                return;
-            }
-
-            var parent = (parentElementName == null)
-                ? doc.Root
-                : doc.Root.Descendants(parentElementName).FirstOrDefault() ?? doc.Root;
-
-            var uid = "PDS3DEnumList_" + cl.EnumNumber;
-
-            var existing = parent
-                .Descendants("SPMapEnumListDef")
-                .FirstOrDefault(def =>
-                {
-                    var io = def.Element("IObject");
-                    return io != null && (string)io.Attribute("UID") == uid;
-                });
-
-            if (existing != null)
-            {
-                // Optional: warn if the name differs
-                var io = existing.Element("IObject");
-                var existingName = io == null ? null : (string)io.Attribute("Name");
-                var targetName = cl.Name ?? string.Empty;
-
-                if (!string.IsNullOrEmpty(targetName) &&
-                    !string.Equals(existingName, targetName, StringComparison.Ordinal))
-                {
-                    if (log != null)
-                        log.Success(string.Format(
-                            "Enum List Exists in ToolMap Schema but Name differs for UID={0}. Existing='{1}', Parsed='{2}'",
-                            uid, existingName ?? "(null)", targetName));
-                }
-                else
-                {
-                    if (log != null) log.Success("  Enum List Exists in ToolMap Schema, UID=" + uid);
-                }
-                return;
-            }
-
-            // Create new node
-            var newDef = new XElement("SPMapEnumListDef",
-                new XElement("IObject",
-                    new XAttribute("UID", uid),
-                    new XAttribute("Name", (object)(cl.Name ?? string.Empty))
-                ),
-                new XElement("IMapObject"),
-                new XElement("IMapEnumListDef",
-                    new XAttribute("ProcessEnumListCriteria", string.Empty)
-                )
-            );
-
-            parent.Add(newDef);
-            if (log != null)
-                log.Success(string.Format("Created ToolMap EnumList: UID={0}, Name='{1}'",
-                    uid, cl.Name ?? string.Empty));
-        }
-
-        private static bool CheckEnumListRels(
-    IToolMapSchemaRepository repo,
-    int enumNumber,
-    ILogger log)
-        {
-
-            if (log != null)
-                log.Info("Checking if the enum list has a valid relation with Enum List on the SPF Side");
-
-
-            var doc = repo.Document;
-            if (doc == null || doc.Root == null)
-            {
-                if (log != null) log.Error("ToolMap repo has no loaded document.");
-                return false;
-            }
-
-            var uid1 = "PDS3DEnumList_" + enumNumber;
-            const string defUid = "MapEnumListToEnumList";
-
-            // Look for: <Rel><IRel UID1="..." DefUID="MapEnumListToEnumList" .../></Rel>
-            var found = doc
-                .Root
-                .Descendants("Rel")
-                .Select(rel => rel.Element("IRel"))
-                .Where(irel => irel != null)
-                .FirstOrDefault(irel =>
-                    string.Equals((string)irel.Attribute("UID1"), uid1, StringComparison.Ordinal) &&
-                    string.Equals((string)irel.Attribute("DefUID"), defUid, StringComparison.Ordinal));
-
-            if (found != null)
-            {
-                var uid2 = (string)found.Attribute("UID2") ?? "(null)";
-                if (log != null)
-                    log.Success(string.Format(
-                        "Relation exists: UID1={0}, UID2={1}, DefUID={2}",
-                        uid1, uid2, defUid));
-                return true;
-            }
-
-            if (log != null)
-                log.Warn(string.Format(
-                    "Relation missing: UID1={0}, DefUID={1}",
-                    uid1, defUid));
-
-            return false;
-        }
+        
     }
 }

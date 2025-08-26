@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -13,6 +14,7 @@ using WindowsFormsApp1.Models;
 using WindowsFormsApp1.Parsers;
 using WindowsFormsApp1.Repositories;
 using WindowsFormsApp1.Repositories.Interfaces;
+using WindowsFormsApp1.Utilities;
 
 namespace WindowsFormsApp1
 {
@@ -133,14 +135,30 @@ namespace WindowsFormsApp1
                     ? (string)rtbPDSComponentXMLFile.Invoke(new Func<string>(() => rtbPDSComponentXMLFile.Text.Trim()))
                     : rtbPDSComponentXMLFile.Text.Trim();
 
+                // Load the toolmap schema into memory
                 _log.Info("Loading ToolMap schema: " + toolMapPath);
                 _toolMapRepo = new ToolMapSchemaXmlRepository(toolMapPath);
                 _log.Info("ToolMap schema loaded.");
 
+                //Load the PDSComponent data into memory
                 _log.Info("Loading SPF schema: " + spfPath);
                 _spfRepo = new SpfSchemaXmlRepository(spfPath);
                 _log.Info("SPF schema loaded.");
 
+                // Scan the Toolmapschema for Enumlists and their SPF side relations
+                _log.Info("Scanning ToolMap EnumLists, verifying relations, and cross-checking SPF…");
+                var scanResults = ToolMapEnumListScanner.ScanEnumListsAndRelations(
+                    _toolMapRepo,
+                    _spfRepo,
+                    _log
+                );
+                _log.Success(
+                    $"Scan done. Total: {scanResults.Count}, " +
+                    $"relations present: {scanResults.Count(r => r.RelationExists)}, " +
+                    $"SPF matches: {scanResults.Count(r => r.SpfEnumListExists)}."
+                );
+
+                // parse the standard note library and store it to validate EnumEnums. 
                 _log.Info("Parsing codelists from: " + codelistFolder);
                 _parsedCodeLists = CodeListParser.ParseFolder(
                     codelistFolder,
@@ -151,7 +169,24 @@ namespace WindowsFormsApp1
                 );
                 _log.Success("Finished Processing the Standard Note Library.");
 
-                // TODO: next steps (validation, apply) will also call _log.Info/Warn/Error.
+                // Parse the allcodeslist files
+                
+                // 1) Read sheet names from INI
+                //string directoryPath = Path.GetDirectoryName(rtbAllCodeListFilePath.Text.Trim());
+                //string txtIniPath = Path.Combine(directoryPath, "PDSConfig.ini"); 
+                //var sheets = IniSheetListReader.ReadSheetNames(txtIniPath.Trim());
+                //_log.Info($"INI sheets: {string.Join(", ", sheets)}");
+
+                //// 2) Build hierarchies from workbook
+                //var hierarchies = ExcelHierarchyParser.BuildHierarchiesMultiLevel(
+                //    rtbAllCodeListFilePath.Text.Trim(), 
+                //    sheets,
+                //    _log);
+
+
+                var spfTarget = VersionedFile.GetNextVersionPath(_spfRepo.FilePath);
+                _spfRepo.Save(spfTarget);
+                _log.Success("Updated PDSComponentFile saved as: " + spfTarget);
 
                 _log.Success("Process complete.");
             }
