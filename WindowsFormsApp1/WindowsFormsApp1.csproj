@@ -99,7 +99,8 @@
     <Compile Include="Repositories\ToolMapSchemaXmlRepository.cs" />
     <Compile Include="Services\ToolMapEnumListService.cs" />
     <Compile Include="Services\ToolMapEnumValueService.cs" />
-    <Compile Include="Utilities\IniSheetListReader.cs" />
+    <Compile Include="Utilities\HierarchyLookup.cs" />
+    <Compile Include="Utilities\IniEnumToSheetReader.cs" />
     <Compile Include="Utilities\VersionedFile.cs" />
     <Compile Include="Utilities\XmlDatabase.cs" />
     <EmbeddedResource Include="Forms\Form1.resx">

@@ -148,14 +148,6 @@ namespace WindowsFormsApp1.Parsers
         }
 
         /// <summary>
-        /// Creates a new SPF &lt;EnumListType&gt; node under the SPF document root.
-        /// - IObject@UID is a NEW GUID in braces.
-        /// - IObject@Name is taken from ToolMap name (may be empty string if null).
-        /// - Adds &lt;ISchemaObj/&gt; and &lt;IPropertyType/&gt; placeholders.
-        /// - If enumNumber is provided, adds &lt;IEnumEnum EnumNumber="N"/&gt;; otherwise omitted.
-        /// Returns the created XElement (EnumListType), or null if repo/doc missing.
-        /// </summary>
-        /// <summary>
         /// Creates a new SPF <EnumListType> under the SPF document root.
         /// - IObject@UID is set to uid2 (from ToolMap relation).
         /// - IObject@Name is taken from ToolMap name.

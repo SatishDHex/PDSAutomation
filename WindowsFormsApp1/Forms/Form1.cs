@@ -145,6 +145,23 @@ namespace WindowsFormsApp1
                 _spfRepo = new SpfSchemaXmlRepository(spfPath);
                 _log.Info("SPF schema loaded.");
 
+                //Read sheet names from INI
+                string directoryPath = Path.GetDirectoryName(rtbAllCodeListFilePath.Text.Trim());
+                string txtIniPath = Path.Combine(directoryPath, "PDSConfig.ini");
+
+
+                var enumToSheet = IniEnumToSheetReader.ReadMap(txtIniPath);
+
+                //Derive the sheet list for the Excel hierarchy parser
+                var sheets = IniEnumToSheetReader.GetDistinctSheets(enumToSheet);
+
+                //Build hierarchies just for those sheets
+                var hierarchies = ExcelHierarchyParser.BuildHierarchiesMultiLevel(
+                    rtbAllCodeListFilePath.Text.Trim(),
+                    sheets,
+                    _log
+                );
+
                 // Scan the Toolmapschema for Enumlists and their SPF side relations
                 _log.Info("Scanning ToolMap EnumLists, verifying relations, and cross-checking SPF…");
                 var scanResults = ToolMapEnumListScanner.ScanEnumListsAndRelations(
@@ -162,26 +179,21 @@ namespace WindowsFormsApp1
                 _log.Info("Parsing codelists from: " + codelistFolder);
                 _parsedCodeLists = CodeListParser.ParseFolder(
                     codelistFolder,
+                    enumToSheet,
+                    hierarchies,
                     true,
                     _log,
-                    _toolMapRepo,                // <-- pass ToolMap repo so creation happens during parse
-                    /* toolMapParentElementName: */ null // or "SPMapEnumListDefs" if your XML has a wrapper
+                    _toolMapRepo, 
+                    _spfRepo,
+                    /* toolMapParentElementName: */ null
                 );
                 _log.Success("Finished Processing the Standard Note Library.");
 
-                // Parse the allcodeslist files
-                
-                // 1) Read sheet names from INI
-                //string directoryPath = Path.GetDirectoryName(rtbAllCodeListFilePath.Text.Trim());
-                //string txtIniPath = Path.Combine(directoryPath, "PDSConfig.ini"); 
-                //var sheets = IniSheetListReader.ReadSheetNames(txtIniPath.Trim());
-                //_log.Info($"INI sheets: {string.Join(", ", sheets)}");
 
-                //// 2) Build hierarchies from workbook
-                //var hierarchies = ExcelHierarchyParser.BuildHierarchiesMultiLevel(
-                //    rtbAllCodeListFilePath.Text.Trim(), 
-                //    sheets,
-                //    _log);
+
+                var tmTarget = VersionedFile.GetNextVersionPath(_toolMapRepo.FilePath);
+                _toolMapRepo.Save(tmTarget);
+                _log.Success("ToolMap schema saved as: " + tmTarget);
 
 
                 var spfTarget = VersionedFile.GetNextVersionPath(_spfRepo.FilePath);

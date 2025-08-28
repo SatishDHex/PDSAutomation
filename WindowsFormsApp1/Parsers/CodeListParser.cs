@@ -13,6 +13,7 @@ using WindowsFormsApp1.Models;
 using WindowsFormsApp1.Repositories;
 using WindowsFormsApp1.Repositories.Interfaces;
 using WindowsFormsApp1.Services;
+using WindowsFormsApp1.Utilities;
 
 namespace WindowsFormsApp1.Parsers
 {
@@ -29,10 +30,13 @@ namespace WindowsFormsApp1.Parsers
         /// Parse all *.edt files in a folder.
         /// </summary>
         public static List<CodeList> ParseFolder(
-            string folderPath, 
+            string folderPath,
+            Dictionary<int, string> enumToSheet,
+            Dictionary<string, MultiLevelHierarchy> hierarchiesBySheet,
             bool recursive = true, 
             ILogger logger = null,
             IToolMapSchemaRepository toolMapRepo = null,
+            ISpfRepository spfRepository = null,
             string toolMapParentElementName = null)
         {
             if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
@@ -40,6 +44,7 @@ namespace WindowsFormsApp1.Parsers
 
             var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
             var files = Directory.GetFiles(folderPath, "*.edt", searchOption);
+
 
             var results = new List<CodeList>();
             foreach (var file in files)
@@ -60,9 +65,16 @@ namespace WindowsFormsApp1.Parsers
                         results.Add(parsed);
                         var name = string.IsNullOrEmpty(parsed.Name) ? "(no name)" : parsed.Name;
 
+
                         // Check the codelist values against EnumEnums in toolmapschema
-                        var valueService = new ToolMapEnumValueService();
-                        valueService.EnsureValuesAndRelations(toolMapRepo, new[] { parsed }, logger);
+                        var svc = new ToolMapEnumValueService();
+                        svc.EnsureValuesAndRelations(
+                                toolMapRepo, 
+                                spfRepository, 
+                                new[] { parsed }, 
+                                enumToSheet,
+                                hierarchiesBySheet, 
+                                logger);
 
                         if (logger != null)
                             logger.Success(string.Format("Processed: {0} (Enum={1}, Name='{2}', Entries={3})",
