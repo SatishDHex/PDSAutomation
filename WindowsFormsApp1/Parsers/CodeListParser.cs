@@ -60,6 +60,9 @@ namespace WindowsFormsApp1.Parsers
                     string skipReason;
                     var parsed = ParseFromFile(file, out skipReason);
 
+                    if (parsed.EnumNumber == 575 || parsed.EnumNumber == 999)
+                        continue; // skip these enum lists for now
+
                     if (parsed != null)
                     {
                         results.Add(parsed);

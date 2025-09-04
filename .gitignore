@@ -103,3 +103,4 @@ secrets.json
 _ReSharper*/
 *.DotSettings.user
 *.sln.iml
+/WindowsFormsApp1/publish

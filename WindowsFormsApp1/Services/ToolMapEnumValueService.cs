@@ -63,40 +63,147 @@ namespace WindowsFormsApp1.Services
                     var parentRelStatus = EnsureParentRelation(tmDoc, enumUid, valueUid);
 
                     // Cross-system Enum->Enum
-                    string spfEnumUid; OpStatus spfEnumStatus;
-                    string crossRelStatus;
+                    // ----- CROSS-SYSTEM: ensure relation, reconcile name, disambiguate by parent if needed -----
+                    string spfEnumUid = null;
+                    string spfEnumName = null;
+                    string crossRelStatus = "Skipped";
+                    string nameEqTag = "OK";
+                    string spfPick = "Existing";
+                    int candidateCount = 0;
+                    string disamb = "None";
 
-                    var crossIrel = FindRelIRel(tmDoc, uid1: valueUid, defUid: DEF_ENUM__ENUM);
-                    if (crossIrel != null)
+                    // Existing relation?
+                    var existingRel = FindRelIRel(tmDoc, uid1: valueUid, defUid: DEF_ENUM__ENUM);
+                    if (existingRel != null)
                     {
-                        spfEnumUid = (string)crossIrel.Attribute("UID2") ?? "(null)";
-                        spfEnumStatus = OpStatus.Exists;
-                        crossRelStatus = "Exists";
-                    }
-                    else
-                    {
-                        // Find/create SPF EnumEnum by NAME ONLY
-                        var spfFound = FindSpfEnumEnumByName(spfDoc, shortName, out var matchCount);
-                        if (spfFound != null)
+                        spfEnumUid = (string)existingRel.Attribute("UID2") ?? "(null)";
+
+                        // fetch current SPF name (may be null if dangling)
+                        var spfByUid = FindSpfEnumEnumByUid(spfDoc, spfEnumUid);
+                        spfEnumName = spfByUid != null ? (string)spfByUid.Element("IObject")?.Attribute("Name") : null;
+
+                        // Compare names
+                        if (!EqName(shortName, spfEnumName))
                         {
-                            spfEnumUid = (string)spfFound.Element("IObject")?.Attribute("UID");
-                            spfEnumStatus = OpStatus.Exists;
+                            // Mark mismatch; we will try to re-link
+                            nameEqTag = "Fix";
+
+                            // Candidates with matching Name
+                            var candidates = FindSpfEnumEnumsByName(spfDoc, shortName);
+                            candidateCount = candidates.Count;
+
+                            XElement chosen = null;
+
+                            if (candidateCount == 0)
+                            {
+                                // Create a new matching EnumEnum
+                                chosen = CreateSpfEnumEnum(spfDoc, yy, shortName);
+                                spfPick = "Created";
+                                disamb = "None";
+                            }
+                            else if (candidateCount == 1)
+                            {
+                                chosen = candidates[0];
+                                spfPick = "Existing";
+                                disamb = "None";
+                            }
+                            else
+                            {
+                                // Many candidates → try to disambiguate via Excel parent
+                                string ExcelparentName = null;
+                                if (!string.IsNullOrEmpty(sheetName) && sheetHierarchy != null)
+                                {
+                                    ExcelparentName = HierarchyLookup.GetImmediateParentFromDeepest(sheetHierarchy, shortName);
+                                }
+
+                                if (!string.IsNullOrEmpty(ExcelparentName))
+                                {
+                                    // Pick the candidate whose parent list type name matches
+                                    chosen = candidates.FirstOrDefault(c =>
+                                    {
+                                        var uid = (string)c.Element("IObject")?.Attribute("UID");
+                                        var parent = GetSpfParentListTypeName(spfDoc, uid);
+                                        return string.Equals(parent ?? "", ExcelparentName ?? "", StringComparison.OrdinalIgnoreCase);
+                                    });
+
+                                    disamb = "ByParent";
+                                }
+
+                                if (chosen == null)
+                                {
+                                    // Fall back to first candidate
+                                    chosen = candidates[0];
+                                    disamb = (string.IsNullOrEmpty(sheetName) ? "First" : "First");
+                                }
+
+                                spfPick = "Existing";
+                            }
+
+                            // Ensure relation points to chosen
+                            spfEnumUid = (string)chosen.Element("IObject")?.Attribute("UID");
+                            spfEnumName = (string)chosen.Element("IObject")?.Attribute("Name");
+                            crossRelStatus = UpsertCrossRel(tmDoc, valueUid, spfEnumUid); // Updated/Created/Exists
                         }
                         else
                         {
-                            var created = CreateSpfEnumEnum(spfDoc, yy, shortName);
-                            spfEnumUid = (string)created.Element("IObject")?.Attribute("UID");
-                            spfEnumStatus = OpStatus.Created;
+                            crossRelStatus = "Exists";
+                            nameEqTag = "OK";
+                        }
+                    }
+                    else
+                    {
+                        // No relation yet → find by Name; create if missing
+                        var candidates = FindSpfEnumEnumsByName(spfDoc, shortName);
+                        candidateCount = candidates.Count;
+
+                        XElement chosen = null;
+
+                        if (candidateCount == 0)
+                        {
+                            chosen = CreateSpfEnumEnum(spfDoc, yy, shortName);
+                            spfPick = "Created";
+                            disamb = "None";
+                        }
+                        else if (candidateCount == 1)
+                        {
+                            chosen = candidates[0];
+                            spfPick = "Existing";
+                            disamb = "None";
+                        }
+                        else
+                        {
+                            // Try to disambiguate via Excel parent
+                            string excelparentName = null;
+                            if (!string.IsNullOrEmpty(sheetName) && sheetHierarchy != null)
+                            {
+                                excelparentName = HierarchyLookup.GetImmediateParentFromDeepest(sheetHierarchy, shortName);
+                            }
+
+                            if (!string.IsNullOrEmpty(excelparentName))
+                            {
+                                chosen = candidates.FirstOrDefault(c =>
+                                {
+                                    var uid = (string)c.Element("IObject")?.Attribute("UID");
+                                    var parent = GetSpfParentListTypeName(spfDoc, uid);
+                                    return string.Equals(parent ?? "", excelparentName ?? "", StringComparison.OrdinalIgnoreCase);
+                                });
+
+                                disamb = "ByParent";
+                            }
+
+                            if (chosen == null)
+                            {
+                                chosen = candidates[0];
+                                disamb = (string.IsNullOrEmpty(sheetName) ? "First" : "First");
+                            }
+
+                            spfPick = "Existing";
                         }
 
-                        // Create TM cross relation now
-                        CreateRelAfterLastRel(tmDoc,
-                            relUid: "{" + Guid.NewGuid().ToString().ToUpper() + "}",
-                            uid1: valueUid,
-                            uid2: spfEnumUid,
-                            defUid: DEF_ENUM__ENUM);
-
-                        crossRelStatus = "Created";
+                        spfEnumUid = (string)chosen.Element("IObject")?.Attribute("UID");
+                        spfEnumName = (string)chosen.Element("IObject")?.Attribute("Name");
+                        crossRelStatus = UpsertCrossRel(tmDoc, valueUid, spfEnumUid); // Created/Exists
+                        nameEqTag = "OK"; // We linked to matching-name target
                     }
 
                     // NEW: Try to link EnumEnum to its parent EnumListType in SPF using Excel hierarchy
@@ -148,18 +255,16 @@ namespace WindowsFormsApp1.Services
                         containsRel = "NoSheet";
                     }
 
-                    // ONE compact line
                     var line =
                         $"EnumList={enumUid} Entry={yy} Name='{shortName}' " +
                         $"Sheet='{sheetName ?? ""}' ParentName='{parentName ?? ""}' ParentSpf={(string.IsNullOrEmpty(parentSpfState) ? "NA" : parentSpfState)} " +
                         $"EnumDef={(enumDefStatus == OpStatus.Created ? "Created" : "Exists")} " +
                         $"ParentRel={(parentRelStatus == OpStatus.Created ? "Created" : "Exists")} " +
-                        $"SpfEnum={(spfEnumStatus == OpStatus.Created ? "Created" : "Exists")} uid2={spfEnumUid} " +
-                        $"CrossRel={crossRelStatus} ContainsRel={containsRel}";
+                        $"SpfPick={spfPick} uid2={spfEnumUid} Candidates={candidateCount} Disamb={disamb} " +
+                        $"CrossRel={crossRelStatus} ContainsRel={containsRel} NameEq={nameEqTag}";
 
-                    // severity
-                    if (enumDefStatus == OpStatus.Created || parentRelStatus == OpStatus.Created ||
-                        spfEnumStatus == OpStatus.Created || crossRelStatus == "Created" || containsRel == "Created")
+                    if (nameEqTag == "Fix" || crossRelStatus == "Created" || crossRelStatus == "Updated" || containsRel == "Created" ||
+                        enumDefStatus == OpStatus.Created || parentRelStatus == OpStatus.Created || parentSpfState == "Created")
                         log?.Success(line);
                     else
                         log?.Info(line);
@@ -354,5 +459,159 @@ namespace WindowsFormsApp1.Services
 
             return node;
         }
+
+        // Find all SPF EnumEnum elements by IObject@Name (case-insensitive)
+        private static List<XElement> FindSpfEnumEnumsByName(XDocument spfDoc, string name)
+        {
+            var list = spfDoc.Root.Elements("EnumEnum")
+                .Where(e =>
+                {
+                    var obj = e.Element("IObject");
+                    if (obj == null) return false;
+                    var n = (string)obj.Attribute("Name");
+                    return string.Equals(n ?? "", name ?? "", StringComparison.OrdinalIgnoreCase);
+                })
+                .ToList();
+            return list;
+        }
+
+        // Given an EnumEnum UID, find its parent EnumListType's Name via Contains relation
+        private static string GetSpfParentListTypeName(XDocument spfDoc, string enumEnumUid)
+        {
+            if (string.IsNullOrWhiteSpace(enumEnumUid)) return null;
+
+            var parentUid = spfDoc.Root.Elements("Rel")
+                .Select(r => r.Element("IRel"))
+                .Where(ir => ir != null &&
+                             string.Equals((string)ir.Attribute("UID2"), enumEnumUid, StringComparison.Ordinal) &&
+                             string.Equals((string)ir.Attribute("DefUID"), "Contains", StringComparison.Ordinal))
+                .Select(ir => (string)ir.Attribute("UID1"))
+                .FirstOrDefault();
+
+            if (string.IsNullOrWhiteSpace(parentUid)) return null;
+
+            var parent = spfDoc.Root.Elements("EnumListType")
+                .FirstOrDefault(e => (string)e.Element("IObject")?.Attribute("UID") == parentUid);
+
+            return parent != null ? (string)parent.Element("IObject")?.Attribute("Name") : null;
+        }
+
+        // Upsert TM cross relation MapEnumToEnum (update UID2 if relation exists with different target)
+        private static string UpsertCrossRel(XDocument tmDoc, string valueUid, string targetSpfUid)
+        {
+            var rel = tmDoc.Root.Elements("Rel")
+                .FirstOrDefault(r =>
+                {
+                    var ir = r.Element("IRel");
+                    return ir != null &&
+                           string.Equals((string)ir.Attribute("UID1"), valueUid, StringComparison.Ordinal) &&
+                           string.Equals((string)ir.Attribute("DefUID"), "MapEnumToEnum", StringComparison.Ordinal);
+                });
+
+            if (rel != null)
+            {
+                var ir = rel.Element("IRel");
+                var current = (string)ir.Attribute("UID2");
+                if (!string.Equals(current, targetSpfUid, StringComparison.Ordinal))
+                {
+                    ir.SetAttributeValue("UID2", targetSpfUid);
+                    return "Updated";
+                }
+                return "Exists";
+            }
+
+            CreateRelAfterLastRel(tmDoc,
+                relUid: "{" + Guid.NewGuid().ToString().ToUpper() + "}",
+                uid1: valueUid,
+                uid2: targetSpfUid,
+                defUid: "MapEnumToEnum");
+            return "Created";
+        }
+
+        /// <summary>
+        /// Find SPF <EnumEnum> by UID (IObject@UID == uid).
+        /// Returns the element or null if not found.
+        /// </summary>
+        private static XElement FindSpfEnumEnumByUid(XDocument spfDoc, string uid)
+        {
+            if (spfDoc == null || spfDoc.Root == null || string.IsNullOrWhiteSpace(uid)) return null;
+
+            return spfDoc.Root.Elements("EnumEnum")
+                .FirstOrDefault(e =>
+                {
+                    var obj = e.Element("IObject");
+                    return obj != null && string.Equals((string)obj.Attribute("UID"), uid, StringComparison.Ordinal);
+                });
+        }
+
+        /// <summary>
+        /// Case-insensitive name comparison with trimming and whitespace collapsing.
+        /// Returns true if names are equivalent (ignoring case and repeated/leading/trailing whitespace).
+        /// </summary>
+        private static bool EqName(string a, string b)
+        {
+            return string.Equals(Norm(a), Norm(b), StringComparison.Ordinal);
+
+            string Norm(string s)
+            {
+                if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+
+                s = s.Trim();
+
+                // Collapse internal whitespace to single spaces and lower-case
+                var sb = new StringBuilder(s.Length);
+                bool prevWs = false;
+                for (int i = 0; i < s.Length; i++)
+                {
+                    char ch = s[i];
+                    if (char.IsWhiteSpace(ch))
+                    {
+                        if (!prevWs) { sb.Append(' '); prevWs = true; }
+                    }
+                    else
+                    {
+                        sb.Append(char.ToLowerInvariant(ch));
+                        prevWs = false;
+                    }
+                }
+                return sb.ToString();
+            }
+        }
+
+        private static string TryGetParentFromHierarchy(
+            Dictionary<string, MultiLevelHierarchy> hierarchiesBySheet,
+            string sheetName,
+            string leafName,
+            out string parentName)
+        {
+            parentName = null;
+
+            if (string.IsNullOrWhiteSpace(sheetName))
+                return "NoSheet"; // INI didn’t map this EnumList
+
+            if (hierarchiesBySheet == null || !hierarchiesBySheet.TryGetValue(sheetName, out var h) || h == null)
+                return "NoHierarchy"; // sheet not parsed / missing
+
+            // Look for leaf at deepest level
+            var deepest = (h.EdgesPerLevel != null && h.EdgesPerLevel.Count > 0)
+                ? h.EdgesPerLevel[h.EdgesPerLevel.Count - 1]
+                : null;
+
+            if (deepest == null) return "NoHierarchy";
+
+            var normLeaf = (leafName ?? "").Trim().ToLowerInvariant();
+
+            foreach (var kv in deepest) // kv.Key = parent, kv.Value = children set
+            {
+                if (kv.Value != null && kv.Value.Contains(normLeaf))
+                {
+                    parentName = kv.Key; // already normalized in builder
+                    return "OK";
+                }
+            }
+
+            return "NoLeaf"; // sheet exists, but leaf not listed
+        }
+
     }
 }
