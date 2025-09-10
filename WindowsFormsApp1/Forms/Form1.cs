@@ -104,6 +104,15 @@ namespace WindowsFormsApp1
                 _log = new LogHub();
                 _log.AddSink(_progressForm);
 
+                // temp file logger
+                string logFile = Path.Combine(
+                    Path.GetTempPath(),
+                    $"ToolMapUtility_{DateTime.Now:yyyyMMdd_HHmmss}.log"
+                );
+
+                _log.AddSink(new FileLogSink(logFile));
+                _log.Info($"Log file created at {logFile}");
+                
                 // 3) Kick off the work on a background task
                 Task.Run(() => RunProcessAsync());
 
